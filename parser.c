@@ -3,7 +3,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-// Token types
 typedef enum {
     TOKEN_KEYWORD_INT,
     TOKEN_KEYWORD_DOUBLE,
@@ -23,22 +22,19 @@ typedef enum {
     TOKEN_UNKNOWN
 } TokenType;
 
-// Token structure
 typedef struct {
     TokenType type;
     char value[50];
 } Token;
 
-// Symbol table entry
 typedef struct {
     char name[50];
-    int isInt;  // 1 for int, 0 for double
+    int isInt;  
     int intValue;
     double doubleValue;
     int isDeclared;
 } Symbol;
 
-// Global variables for parsing
 Token currentToken;
 FILE *inputFile;
 int hasError = 0;
@@ -49,12 +45,10 @@ int expressionCount = 0;
 int suppressTokenPrint = 0;
 int tokenPrintDeferred = 0;
 
-// Symbol table (dynamic)
 static Symbol *symbolTable = NULL;
 static int symbolCount = 0;
 static int symbolCapacity = 0;
 
-// Function prototypes
 void getNextToken();
 void getNextTokenSilently();
 void program();
@@ -80,13 +74,11 @@ void printSymbolTable();
 void initSymbolTable();
 void freeSymbolTable();
 
-// Get next token from input
 void getNextToken() {
     char ch;
     char buffer[50];
     int i;
 
-    // Skip whitespace and track line numbers
     while ((ch = fgetc(inputFile)) != EOF && isspace(ch)) {
         if (ch == '\n') {
             lineNumber++;
@@ -104,14 +96,13 @@ void getNextToken() {
         return;
     }
 
-    // Identifier or Keyword
     if (isalpha(ch)) {
         i = 0;
         buffer[i++] = ch;
 
         while (isalnum(ch = fgetc(inputFile))) {
             buffer[i++] = ch;
-            if (i >= 49) {  // Buffer overflow protection
+            if (i >= 49) {  
                 buffer[49] = '\0';
                 syntaxError("Identifier too long (max 49 characters)");
                 break;
@@ -131,8 +122,7 @@ void getNextToken() {
             currentToken.type = TOKEN_IDENTIFIER;
         }
         strcpy(currentToken.value, buffer);
-    }
-    // Number (integer or decimal)
+    } 
     else if (isdigit(ch)) {
         i = 0;
         buffer[i++] = ch;
@@ -143,7 +133,7 @@ void getNextToken() {
                 hasDecimal = 1;
             }
             buffer[i++] = ch;
-            if (i >= 49) {  // Buffer overflow protection
+            if (i >= 49) { 
                 buffer[49] = '\0';
                 syntaxError("Number too long");
                 break;
@@ -156,7 +146,7 @@ void getNextToken() {
         currentToken.type = hasDecimal ? TOKEN_DECIMAL : TOKEN_NUMBER;
         strcpy(currentToken.value, buffer);
     }
-    // Operators and Symbols
+    
     else if (ch == '=') {
         currentToken.type = TOKEN_OPERATOR_ASSIGN;
         currentToken.value[0] = ch;
@@ -260,7 +250,6 @@ void semanticError(const char *message) {
     hasError = 1;
 }
 
-// Check if variable is declared
 int isVariableDeclared(const char *varName) {
     for (int i = 0; i < symbolCount; i++) {
         if (strcmp(symbolTable[i].name, varName) == 0) {
@@ -269,7 +258,6 @@ int isVariableDeclared(const char *varName) {
     }
     return 0;
 }
-
 int findSymbol(const char *varName) {
     for (int i = 0; i < symbolCount; i++) {
         if (strcmp(symbolTable[i].name, varName) == 0) {
@@ -278,7 +266,6 @@ int findSymbol(const char *varName) {
     }
     return -1;
 }
-
 double getSymbolValue(const char *varName) {
     int idx = findSymbol(varName);
     if (idx == -1 || !symbolTable[idx].isDeclared) {
@@ -305,13 +292,11 @@ void setSymbolValue(const char *varName, double value, int isInt) {
     }
 }
 
-// Add symbol to symbol table
 int addSymbol(const char *varName) {
     return addSymbolWithType(varName, 1);
 }
 
 int addSymbolWithType(const char *varName, int isInt) {
-    // Check for duplicate declaration
     if (isVariableDeclared(varName)) {
         char errorMsg[100];
         sprintf(errorMsg, "Variable '%s' already declared", varName);
@@ -354,8 +339,6 @@ void printSymbolTable() {
     }
     printf("======COMPLETED======\n");
 }
-
-// CFG: program -> statement*
 void program() {
     printf("=== Starting Parse ===\n\n");
     getNextTokenSilently();
@@ -363,7 +346,6 @@ void program() {
     while (currentToken.type != TOKEN_EOF && !hasError) {
         statement();
     }
-    
     printf("\n=== Parse Complete ===\n");
     printf("Syntax Errors: %d\n", syntaxErrors);
     printf("Semantic Errors: %d\n", semanticErrors);
@@ -376,8 +358,6 @@ void program() {
         printf("Status: FAILED\n");
     }
 }
-
-// CFG: statement -> declaration | assignment | printStmt
 void statement() {
     expressionCount++;
     printf("\n[EXPR %d]\n", expressionCount);
@@ -393,14 +373,13 @@ void statement() {
         assignment();
     } else if (currentToken.type == TOKEN_UNKNOWN) {
         syntaxError("Unexpected character in statement");
-        getNextToken();  // Try to recover
+        getNextToken();  
     } else {
         syntaxError("Expected statement (declaration, assignment, or print)");
-        getNextToken();  // Try to recover
+        getNextToken();  
     }
 }
 
-// CFG: declaration -> ('int' | 'double') IDENTIFIER '=' expression ';'
 void declaration() {
     printf("Parsing declaration...\n");
     char varName[50];
@@ -426,12 +405,10 @@ void declaration() {
             getNextToken();
         }
         return;
-    }
-    
+    }  
     strcpy(varName, currentToken.value);
     getNextToken();
     
-    // Add to symbol table (semantic check)
     addSymbolWithType(varName, isInt);
     
     if (currentToken.type != TOKEN_OPERATOR_ASSIGN) {
@@ -450,7 +427,6 @@ void declaration() {
     getNextTokenSilently();
 }
 
-// CFG: assignment -> IDENTIFIER '=' expression ';'
 void assignment() {
     printf("Parsing assignment...\n");
     char varName[50];
@@ -461,8 +437,7 @@ void assignment() {
     }
     
     strcpy(varName, currentToken.value);
-    
-    // Check if variable is declared (semantic check)
+     
     if (!isVariableDeclared(varName)) {
         char errorMsg[100];
         sprintf(errorMsg, "Variable '%s' used before declaration", varName);
@@ -490,7 +465,6 @@ void assignment() {
     getNextTokenSilently();
 }
 
-// CFG: printStmt -> 'print' '(' IDENTIFIER ')' ';'
 void printStmt() {
     printf("Parsing print statement...\n");
     char varName[50];
@@ -521,7 +495,6 @@ void printStmt() {
     
     strcpy(varName, currentToken.value);
     
-    // Check if variable is declared (semantic check)
     if (!isVariableDeclared(varName)) {
         char errorMsg[100];
         sprintf(errorMsg, "Variable '%s' used in print() before declaration", varName);
@@ -550,7 +523,6 @@ void printStmt() {
     getNextTokenSilently();
 }
 
-// CFG: expression -> term (('+' | '-') term)*
 double expression() {
     double left = term();
     
@@ -568,7 +540,6 @@ double expression() {
     return left;
 }
 
-// CFG: term -> factor (('*' | '/') factor)*
 double term() {
     double left = factor();
 
@@ -590,7 +561,6 @@ double term() {
     return left;
 }
 
-// CFG: factor -> IDENTIFIER | NUMBER | DECIMAL
 double factor() {
     if (currentToken.type == TOKEN_IDENTIFIER) {
         double value = getSymbolValue(currentToken.value);
@@ -610,24 +580,20 @@ double factor() {
         return 0.0;
     }
 }
-
 int result() {
-    return 0;  // Placeholder if needed elsewhere
+    return 0;  
 }
-
 void initSymbolTable() {
     symbolTable = NULL;
     symbolCount = 0;
     symbolCapacity = 0;
 }
-
 void freeSymbolTable() {
     free(symbolTable);
     symbolTable = NULL;
     symbolCount = 0;
     symbolCapacity = 0;
 }
-
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         printf("Usage: ./parser inputfile\n");
