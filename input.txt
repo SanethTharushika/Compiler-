@@ -1,4 +1,8 @@
-int y = 53;
-int x = 20;
+int y = 50;
+double x = 20.5;
+int p = 4;
+double w = x + y * p;
 int z = x - y;
-print(z);
+int q = x * y;
+double i = y / x;
+

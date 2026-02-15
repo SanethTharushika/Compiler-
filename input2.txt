@@ -1,0 +1,4 @@
+int s = 10;
+int t = 5;
+int p = s + t;
+print(p);

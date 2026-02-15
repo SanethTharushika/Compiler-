@@ -6,11 +6,16 @@
 // Token types
 typedef enum {
     TOKEN_KEYWORD_INT,
+    TOKEN_KEYWORD_DOUBLE,
     TOKEN_KEYWORD_PRINT,
     TOKEN_IDENTIFIER,
     TOKEN_NUMBER,
+    TOKEN_DECIMAL,
     TOKEN_OPERATOR_ASSIGN,
     TOKEN_OPERATOR_PLUS,
+    TOKEN_OPERATOR_MINUS,
+    TOKEN_OPERATOR_MULTIFLY,
+    TOKEN_OPERATOR_DIVISION,    
     TOKEN_SYMBOL_SEMICOLON,
     TOKEN_SYMBOL_LPAREN,
     TOKEN_SYMBOL_RPAREN,
@@ -27,7 +32,9 @@ typedef struct {
 // Symbol table entry
 typedef struct {
     char name[50];
-    int value;
+    int isInt;  // 1 for int, 0 for double
+    int intValue;
+    double doubleValue;
     int isDeclared;
 } Symbol;
 
@@ -38,28 +45,40 @@ int hasError = 0;
 int syntaxErrors = 0;
 int semanticErrors = 0;
 int lineNumber = 1;
+int expressionCount = 0;
+int suppressTokenPrint = 0;
+int tokenPrintDeferred = 0;
 
-// Symbol table
-Symbol symbolTable[100];
-int symbolCount = 0;
+// Symbol table (dynamic)
+static Symbol *symbolTable = NULL;
+static int symbolCount = 0;
+static int symbolCapacity = 0;
 
 // Function prototypes
 void getNextToken();
+void getNextTokenSilently();
 void program();
 void statement();
 void declaration();
 void assignment();
 void printStmt();
-int expression();
-int term();
+double expression();
+double term();
+double factor();
+
 void syntaxError(const char *message);
 void semanticError(const char *message);
+const char *tokenTypeName(TokenType type);
+void printToken();
 int isVariableDeclared(const char *varName);
 int addSymbol(const char *varName);
 int findSymbol(const char *varName);
-int getSymbolValue(const char *varName);
-void setSymbolValue(const char *varName, int value);
+double getSymbolValue(const char *varName);
+void setSymbolValue(const char *varName, double value, int isInt);
+int addSymbolWithType(const char *varName, int isInt);
 void printSymbolTable();
+void initSymbolTable();
+void freeSymbolTable();
 
 // Get next token from input
 void getNextToken() {
@@ -77,6 +96,11 @@ void getNextToken() {
     if (ch == EOF) {
         currentToken.type = TOKEN_EOF;
         strcpy(currentToken.value, "EOF");
+        if (!suppressTokenPrint) {
+            printToken();
+        }
+        suppressTokenPrint = 0;
+        tokenPrintDeferred = 0;
         return;
     }
 
@@ -99,6 +123,8 @@ void getNextToken() {
 
         if (strcmp(buffer, "int") == 0) {
             currentToken.type = TOKEN_KEYWORD_INT;
+        } else if (strcmp(buffer, "double") == 0) {
+            currentToken.type = TOKEN_KEYWORD_DOUBLE;
         } else if (strcmp(buffer, "print") == 0) {
             currentToken.type = TOKEN_KEYWORD_PRINT;
         } else {
@@ -106,12 +132,16 @@ void getNextToken() {
         }
         strcpy(currentToken.value, buffer);
     }
-    // Number
+    // Number (integer or decimal)
     else if (isdigit(ch)) {
         i = 0;
         buffer[i++] = ch;
+        int hasDecimal = 0;
 
-        while (isdigit(ch = fgetc(inputFile))) {
+        while (isdigit(ch = fgetc(inputFile)) || (ch == '.' && !hasDecimal)) {
+            if (ch == '.') {
+                hasDecimal = 1;
+            }
             buffer[i++] = ch;
             if (i >= 49) {  // Buffer overflow protection
                 buffer[49] = '\0';
@@ -123,7 +153,7 @@ void getNextToken() {
         buffer[i] = '\0';
         ungetc(ch, inputFile);
 
-        currentToken.type = TOKEN_NUMBER;
+        currentToken.type = hasDecimal ? TOKEN_DECIMAL : TOKEN_NUMBER;
         strcpy(currentToken.value, buffer);
     }
     // Operators and Symbols
@@ -134,6 +164,21 @@ void getNextToken() {
     }
     else if (ch == '+') {
         currentToken.type = TOKEN_OPERATOR_PLUS;
+        currentToken.value[0] = ch;
+        currentToken.value[1] = '\0';
+    }
+    else if (ch == '-') {
+        currentToken.type = TOKEN_OPERATOR_MINUS;
+        currentToken.value[0] = ch;
+        currentToken.value[1] = '\0';
+    }
+    else if (ch == '*') {
+        currentToken.type = TOKEN_OPERATOR_MULTIFLY;
+        currentToken.value[0] = ch;
+        currentToken.value[1] = '\0';
+    }
+    else if (ch == '/') {
+        currentToken.type = TOKEN_OPERATOR_DIVISION;
         currentToken.value[0] = ch;
         currentToken.value[1] = '\0';
     }
@@ -160,6 +205,45 @@ void getNextToken() {
         sprintf(errorMsg, "Unknown character '%c' (ASCII: %d)", ch, (int)ch);
         syntaxError(errorMsg);
     }
+
+    if (suppressTokenPrint) {
+        suppressTokenPrint = 0;
+        tokenPrintDeferred = 1;
+        return;
+    }
+    tokenPrintDeferred = 0;
+    printToken();
+}
+
+void getNextTokenSilently() {
+    suppressTokenPrint = 1;
+    getNextToken();
+}
+
+const char *tokenTypeName(TokenType type) {
+    switch (type) {
+        case TOKEN_KEYWORD_INT: return "KEYWORD_INT";
+        case TOKEN_KEYWORD_DOUBLE: return "KEYWORD_DOUBLE";
+        case TOKEN_KEYWORD_PRINT: return "KEYWORD_PRINT";
+        case TOKEN_IDENTIFIER: return "IDENTIFIER";
+        case TOKEN_NUMBER: return "NUMBER";
+        case TOKEN_DECIMAL: return "DECIMAL";
+        case TOKEN_OPERATOR_ASSIGN: return "OP_ASSIGN";
+        case TOKEN_OPERATOR_PLUS: return "OP_PLUS";
+        case TOKEN_OPERATOR_MINUS: return "OP_MINUS";
+        case TOKEN_OPERATOR_MULTIFLY: return "OP_MULTIPLY";
+        case TOKEN_OPERATOR_DIVISION: return "OP_DIVISION";
+        case TOKEN_SYMBOL_SEMICOLON: return "SEMICOLON";
+        case TOKEN_SYMBOL_LPAREN: return "LPAREN";
+        case TOKEN_SYMBOL_RPAREN: return "RPAREN";
+        case TOKEN_EOF: return "EOF";
+        case TOKEN_UNKNOWN: return "UNKNOWN";
+        default: return "UNKNOWN";
+    }
+}
+
+void printToken() {
+    printf("[TOKEN] Line %d: %s ('%s')\n", lineNumber, tokenTypeName(currentToken.type), currentToken.value);
 }
 
 void syntaxError(const char *message) {
@@ -195,7 +279,7 @@ int findSymbol(const char *varName) {
     return -1;
 }
 
-int getSymbolValue(const char *varName) {
+double getSymbolValue(const char *varName) {
     int idx = findSymbol(varName);
     if (idx == -1 || !symbolTable[idx].isDeclared) {
         char errorMsg[100];
@@ -203,10 +287,10 @@ int getSymbolValue(const char *varName) {
         semanticError(errorMsg);
         return 0;
     }
-    return symbolTable[idx].value;
+    return symbolTable[idx].isInt ? (double)symbolTable[idx].intValue : symbolTable[idx].doubleValue;
 }
 
-void setSymbolValue(const char *varName, int value) {
+void setSymbolValue(const char *varName, double value, int isInt) {
     int idx = findSymbol(varName);
     if (idx == -1 || !symbolTable[idx].isDeclared) {
         char errorMsg[100];
@@ -214,11 +298,19 @@ void setSymbolValue(const char *varName, int value) {
         semanticError(errorMsg);
         return;
     }
-    symbolTable[idx].value = value;
+    if (isInt) {
+        symbolTable[idx].intValue = (int)value;
+    } else {
+        symbolTable[idx].doubleValue = value;
+    }
 }
 
 // Add symbol to symbol table
 int addSymbol(const char *varName) {
+    return addSymbolWithType(varName, 1);
+}
+
+int addSymbolWithType(const char *varName, int isInt) {
     // Check for duplicate declaration
     if (isVariableDeclared(varName)) {
         char errorMsg[100];
@@ -227,14 +319,22 @@ int addSymbol(const char *varName) {
         return 0;
     }
     
-    if (symbolCount >= 100) {
-        semanticError("Symbol table full (max 100 variables)");
-        return 0;
+    if (symbolCount >= symbolCapacity) {
+        int newCapacity = (symbolCapacity == 0) ? 16 : symbolCapacity * 2;
+        Symbol *newTable = (Symbol *)realloc(symbolTable, sizeof(Symbol) * newCapacity);
+        if (!newTable) {
+            semanticError("Out of memory while growing symbol table");
+            return 0;
+        }
+        symbolTable = newTable;
+        symbolCapacity = newCapacity;
     }
     
     strcpy(symbolTable[symbolCount].name, varName);
     symbolTable[symbolCount].isDeclared = 1;
-    symbolTable[symbolCount].value = 0;
+    symbolTable[symbolCount].isInt = isInt;
+    symbolTable[symbolCount].intValue = 0;
+    symbolTable[symbolCount].doubleValue = 0.0;
     symbolCount++;
     return 1;
 }
@@ -245,16 +345,20 @@ void printSymbolTable() {
         printf("(empty)\n");
     } else {
         for (int i = 0; i < symbolCount; i++) {
-            printf("  Variable: %s = %d\n", symbolTable[i].name, symbolTable[i].value);
+            if (symbolTable[i].isInt) {
+                printf("  Variable: %s (int) = %d\n", symbolTable[i].name, symbolTable[i].intValue);
+            } else {
+                printf("  Variable: %s (double) = %.2f\n", symbolTable[i].name, symbolTable[i].doubleValue);
+            }
         }
     }
-    printf("====================\n");
+    printf("======COMPLETED======\n");
 }
 
 // CFG: program -> statement*
 void program() {
     printf("=== Starting Parse ===\n\n");
-    getNextToken();
+    getNextTokenSilently();
     
     while (currentToken.type != TOKEN_EOF && !hasError) {
         statement();
@@ -263,6 +367,7 @@ void program() {
     printf("\n=== Parse Complete ===\n");
     printf("Syntax Errors: %d\n", syntaxErrors);
     printf("Semantic Errors: %d\n", semanticErrors);
+    printf("Expressions: %d\n", expressionCount);
     
     if (!hasError) {
         printf("Status: SUCCESS\n");
@@ -274,7 +379,13 @@ void program() {
 
 // CFG: statement -> declaration | assignment | printStmt
 void statement() {
-    if (currentToken.type == TOKEN_KEYWORD_INT) {
+    expressionCount++;
+    printf("\n[EXPR %d]\n", expressionCount);
+    if (tokenPrintDeferred) {
+        printToken();
+        tokenPrintDeferred = 0;
+    }
+    if (currentToken.type == TOKEN_KEYWORD_INT || currentToken.type == TOKEN_KEYWORD_DOUBLE) {
         declaration();
     } else if (currentToken.type == TOKEN_KEYWORD_PRINT) {
         printStmt();
@@ -289,19 +400,24 @@ void statement() {
     }
 }
 
-// CFG: declaration -> 'int' IDENTIFIER '=' expression ';'
+// CFG: declaration -> ('int' | 'double') IDENTIFIER '=' expression ';'
 void declaration() {
     printf("Parsing declaration...\n");
     char varName[50];
+    int isInt = 0;
     
-    if (currentToken.type != TOKEN_KEYWORD_INT) {
-        syntaxError("Expected 'int' keyword");
+    if (currentToken.type == TOKEN_KEYWORD_INT) {
+        isInt = 1;
+    } else if (currentToken.type == TOKEN_KEYWORD_DOUBLE) {
+        isInt = 0;
+    } else {
+        syntaxError("Expected 'int' or 'double' keyword");
         return;
     }
     getNextToken();
     
     if (currentToken.type != TOKEN_IDENTIFIER) {
-        syntaxError("Expected identifier after 'int'");
+        syntaxError("Expected identifier after type keyword");
         while (currentToken.type != TOKEN_SYMBOL_SEMICOLON && 
                currentToken.type != TOKEN_EOF) {
             getNextToken();
@@ -316,7 +432,7 @@ void declaration() {
     getNextToken();
     
     // Add to symbol table (semantic check)
-    addSymbol(varName);
+    addSymbolWithType(varName, isInt);
     
     if (currentToken.type != TOKEN_OPERATOR_ASSIGN) {
         syntaxError("Expected '=' operator after identifier");
@@ -324,14 +440,14 @@ void declaration() {
     }
     getNextToken();
     
-    int value = expression();
+    double value = expression();
     
     if (currentToken.type != TOKEN_SYMBOL_SEMICOLON) {
         syntaxError("Expected ';' at end of declaration");
         return;
     }
-    setSymbolValue(varName, value);
-    getNextToken();
+    setSymbolValue(varName, value, isInt);
+    getNextTokenSilently();
 }
 
 // CFG: assignment -> IDENTIFIER '=' expression ';'
@@ -361,14 +477,17 @@ void assignment() {
     }
     getNextToken();
     
-    int value = expression();
+    double value = expression();
     
     if (currentToken.type != TOKEN_SYMBOL_SEMICOLON) {
         syntaxError("Expected ';' at end of assignment");
         return;
     }
-    setSymbolValue(varName, value);
-    getNextToken();
+    int idx = findSymbol(varName);
+    if (idx != -1) {
+        setSymbolValue(varName, value, symbolTable[idx].isInt);
+    }
+    getNextTokenSilently();
 }
 
 // CFG: printStmt -> 'print' '(' IDENTIFIER ')' ';'
@@ -409,7 +528,8 @@ void printStmt() {
         semanticError(errorMsg);
     }
     
-    int value = getSymbolValue(varName);
+    double value = getSymbolValue(varName);
+    int idx = findSymbol(varName);
     getNextToken();
     
     if (currentToken.type != TOKEN_SYMBOL_RPAREN) {
@@ -422,37 +542,90 @@ void printStmt() {
         syntaxError("Expected ';' at end of print statement");
         return;
     }
-    printf("Result: %d\n", value);
-    getNextToken();
+    if (idx != -1 && symbolTable[idx].isInt) {
+        printf("Result: %d\n", (int)value);
+    } else {
+        printf("Result: %.2f\n", value);
+    }
+    getNextTokenSilently();
 }
 
-// CFG: expression -> term ('+' term)*
-int expression() {
-    int left = term();
+// CFG: expression -> term (('+' | '-') term)*
+double expression() {
+    double left = term();
     
-    while (currentToken.type == TOKEN_OPERATOR_PLUS) {
+    while (currentToken.type == TOKEN_OPERATOR_PLUS ||
+           currentToken.type == TOKEN_OPERATOR_MINUS) {
+        TokenType op = currentToken.type;
         getNextToken();
-        int right = term();
-        left = left + right;
+        double right = term();
+        if (op == TOKEN_OPERATOR_PLUS) {
+            left = left + right;
+        } else if (op == TOKEN_OPERATOR_MINUS) {
+            left = left - right;
+        }
     }
     return left;
 }
 
-// CFG: term -> IDENTIFIER | NUMBER
-int term() {
+// CFG: term -> factor (('*' | '/') factor)*
+double term() {
+    double left = factor();
+
+    while (currentToken.type == TOKEN_OPERATOR_MULTIFLY ||
+           currentToken.type == TOKEN_OPERATOR_DIVISION) {
+        TokenType op = currentToken.type;
+        getNextToken();
+        double right = factor();
+        if (op == TOKEN_OPERATOR_MULTIFLY) {
+            left = left * right;
+        } else {
+            if (right == 0.0) {
+                semanticError("Division by zero");
+                return 0.0;
+            }
+            left = left / right;
+        }
+    }
+    return left;
+}
+
+// CFG: factor -> IDENTIFIER | NUMBER | DECIMAL
+double factor() {
     if (currentToken.type == TOKEN_IDENTIFIER) {
-        int value = getSymbolValue(currentToken.value);
+        double value = getSymbolValue(currentToken.value);
         getNextToken();
         return value;
     } else if (currentToken.type == TOKEN_NUMBER) {
-        int value = atoi(currentToken.value);
+        double value = (double)atoi(currentToken.value);
+        getNextToken();
+        return value;
+    } else if (currentToken.type == TOKEN_DECIMAL) {
+        double value = atof(currentToken.value);
         getNextToken();
         return value;
     } else {
         syntaxError("Expected identifier or number in expression");
         getNextToken();
-        return 0;
+        return 0.0;
     }
+}
+
+int result() {
+    return 0;  // Placeholder if needed elsewhere
+}
+
+void initSymbolTable() {
+    symbolTable = NULL;
+    symbolCount = 0;
+    symbolCapacity = 0;
+}
+
+void freeSymbolTable() {
+    free(symbolTable);
+    symbolTable = NULL;
+    symbolCount = 0;
+    symbolCapacity = 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -467,9 +640,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    initSymbolTable();
     program();
     
     fclose(inputFile);
+    freeSymbolTable();
 
     return hasError ? 1 : 0;
 }
